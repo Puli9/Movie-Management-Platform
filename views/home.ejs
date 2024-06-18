@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Movie Playlist</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+
+    <style>
+        body {
+            margin: 0;
+            /* Removes default margin */
+            padding: 0;
+            /* Removes default padding */
+            height: 100vh;
+            /* Ensures that the body covers at least the full viewport height */
+            background: radial-gradient(circle, #f1d46a, #e5ba39);
+            /* Radial gradient from dark blue to turquoise */
+        }
+
+        #results-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .movie {
+            border: 1px solid #ccc;
+            padding: 10px;
+            width: 200px;
+            text-align: center;
+        }
+
+        .movie img {
+            width: 100%;
+            border-radius: 5px;
+            height: auto;
+        }
+
+        .playlist {
+            border: 1px solid #ccc;
+            margin: 10px 0;
+            padding: 10px;
+        }
+
+        .dialog-container {
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            border: 1px solid #ccc;
+            padding: 20px;
+            background-color: white;
+            z-index: 1000;
+        }
+    </style>
+</head>
+
+<body class="m-2">
+
+    <div class="row">
+        <div class="col-md-9 main-content">
+            <h2>Movie Search</h2>
+            <div class="input-group mb-3">
+                <input type="text" id="search-bar" class="form-control" placeholder="Enter movie name">
+                <div class="input-group-append">
+                    <button id="search-btn" class="btn btn-primary">Search</button>
+                </div>
+            </div>
+            <div id="movie-details"></div>
+            <div id="nav-buttons" class="mb-3">
+                <button id="prev-btn" class="btn btn-secondary">Prev</button>
+                <button id="next-btn" class="btn btn-secondary">Next</button>
+            </div>
+            <div id="results-container" class="d-flex flex-wrap"></div>
+        </div>
+
+        <div class="col-md-3 sidebar">
+            <h2>Playlists</h2>
+            <form id="create-playlist-form" class="mb-3">
+                <div class="form-group">
+                    <input type="text" id="playlist-name" class="form-control" placeholder="Playlist name" required>
+                </div>
+                <div class="form-group form-check">
+                    <input type="checkbox" id="playlist-private" class="form-check-input">
+                    <label for="playlist-private" class="form-check-label">Private</label>
+                </div>
+                <button type="submit" class="btn btn-success">Create Playlist</button>
+            </form>
+            <div id="playlists"></div>
+        </div>
+
+        <form method="post" action="/logout" class="w-100 text-right mt-3">
+            <input type="submit" value="logout" class="btn btn-danger">
+        </form>
+    </div>
+
+    <script>
+        const buttons = document.getElementById("nav-buttons");
+        buttons.style.display = "none";
+        let page = 1;
+        let totalPages = 1;
+        let playlists = [];
+
+        const getPlayLists = async () => {
+            try {
+                const res = await fetch('/user/playlists');
+                if (!res.ok) {
+                    throw new Error(`HTTP error! Status: ${res.status}`);
+                }
+                const data = await res.json();
+                playlists = data.playlists;
+                displayPlaylists();
+            } catch (e) {
+                console.error('Error fetching playlists:', e);
+            }
+        };
+
+        getPlayLists();
+
+        document.getElementById('search-btn').addEventListener('click', async () => {
+            page = 1;
+            searchMovies();
+        });
+
+        document.getElementById('prev-btn').addEventListener('click', async () => {
+            if (page > 1) page--;
+            searchMovies();
+        });
+
+        document.getElementById('next-btn').addEventListener('click', async () => {
+            if (page < totalPages) page++;
+            searchMovies();
+        });
+
+        document.getElementById('create-playlist-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const playlistName = document.getElementById('playlist-name').value;
+            const isPrivate = document.getElementById('playlist-private').checked;
+            createPlaylist(playlistName, isPrivate);
+            document.getElementById('playlist-name').value = '';
+            document.getElementById('playlist-private').checked = false;
+        });
+
+        async function searchMovies() {
+            const movieName = document.getElementById('search-bar').value;
+            const response = await fetch('/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ searchTerm: movieName, page: page })
+            });
+
+            if (response.ok) {
+                buttons.style.display = "block";
+                const data = await response.json();
+                totalPages = Math.ceil(data.totalResults / 10);
+                displayResults(data.Search);
+            } else {
+                console.error('Search failed:', response.status, response.statusText);
+            }
+        }
+
+        function displayResults(movies) {
+            const resultsContainer = document.getElementById('results-container');
+            resultsContainer.innerHTML = '';
+
+            if (movies && movies.length > 0) {
+                movies.forEach(movie => {
+                    const movieElement = document.createElement('div');
+                    movieElement.classList.add('movie');
+
+                    const title = document.createElement('h2');
+                    title.textContent = movie.Title;
+                    movieElement.appendChild(title);
+
+                    const year = document.createElement('p');
+                    year.textContent = `Year: ${movie.Year}`;
+                    movieElement.appendChild(year);
+
+                    const poster = document.createElement('img');
+                    poster.src = movie.Poster;
+                    poster.alt = `${movie.Title} Poster`;
+                    movieElement.appendChild(poster);
+
+                    const addButton = document.createElement('button');
+                    addButton.classList.add('btn', 'btn-primary', 'm-2');
+                    addButton.textContent = 'Add to Playlist';
+                    addButton.addEventListener('click', () => addToPlaylist(movie));
+                    movieElement.appendChild(addButton);
+
+                    resultsContainer.appendChild(movieElement);
+                });
+            } else {
+                resultsContainer.textContent = 'No results found.';
+            }
+        }
+
+        async function createPlaylist(name, isPrivate) {
+            try {
+                const res = await fetch('/create/playlist', {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        name: name,
+                        isPrivate: isPrivate
+                    })
+                });
+
+                if (!res.ok) {
+                    throw new Error(`HTTP error! Status: ${res.status}`);
+                }
+
+                const data = await res.json();
+                playlists.push(data.playlist);
+                displayPlaylists();
+            } catch (e) {
+                console.error('Error occurred while creating a playlist:', e);
+            }
+        }
+
+        function addToPlaylist(movie) {
+            const dialogBox = createPlaylistDialog(movie);
+            document.body.appendChild(dialogBox);
+        }
+
+        function createPlaylistDialog(movie) {
+            const dialogContainer = document.createElement('div');
+            dialogContainer.classList.add('dialog-container');
+
+            const select = document.createElement('select');
+            select.classList.add('form-control', 'mb-3');
+            populatePlaylistOptions(select);
+
+            const addButton = document.createElement('button');
+            addButton.classList.add('btn', 'btn-primary', 'mr-2');
+            addButton.textContent = 'Add to this Playlist';
+            addButton.onclick = () => addMovieToPlaylist(select, movie, dialogContainer);
+
+            const cancelButton = document.createElement('button');
+            cancelButton.classList.add('btn', 'btn-secondary');
+            cancelButton.textContent = 'Cancel';
+            cancelButton.onclick = () => document.body.removeChild(dialogContainer);
+
+            dialogContainer.appendChild(select);
+            dialogContainer.appendChild(addButton);
+            dialogContainer.appendChild(cancelButton);
+
+            return dialogContainer;
+        }
+
+        function populatePlaylistOptions(selectElement) {
+            playlists.forEach(playlist => {
+                const option = document.createElement('option');
+                option.value = playlist.name;
+                option.textContent = playlist.name;
+                selectElement.appendChild(option);
+            });
+        }
+
+        async function addMovieToPlaylist(select, movie, dialogContainer) {
+            const selectedPlaylistName = select.value;
+            const playlist = playlists.find(p => p.name === selectedPlaylistName);
+
+            if (playlist) {
+                try {
+                    const res = await fetch('/add/movie', {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            playlist: playlist,
+                            movie: movie
+                        })
+                    });
+
+                    if (!res.ok) {
+                        throw new Error(`HTTP error! Status: ${res.status}`);
+                    }
+
+                    const data = await res.json();
+                    console.log(data);
+                    playlist.movies.push(movie);
+                    displayPlaylists();
+                    document.body.removeChild(dialogContainer);
+                } catch (e) {
+                    console.error('Error adding movie to playlist:', e);
+                }
+            } else {
+                alert('Playlist not found.');
+            }
+        }
+
+        async function displayPlaylists() {
+            const playlistsContainer = document.getElementById('playlists');
+            playlistsContainer.innerHTML = '';
+
+            playlists.forEach((playlist, index) => {
+                const playlistElement = createPlaylistElement(playlist, index);
+                playlistsContainer.appendChild(playlistElement);
+            });
+        }
+
+        function createPlaylistElement(playlist, index) {
+            const playlistElement = document.createElement('div');
+            playlistElement.classList.add('playlist', 'card', 'mb-3', 'p-3');
+
+            const title = document.createElement('h3');
+            title.textContent = playlist.name;
+            playlistElement.appendChild(title);
+
+            const privacy = document.createElement('p');
+            privacy.textContent = playlist.isPrivate ? 'Private' : 'Public';
+            playlistElement.appendChild(privacy);
+
+            if (!playlist.isPrivate) {
+                const copyLinkBtn = document.createElement('button');
+                copyLinkBtn.classList.add('btn', 'btn-info', 'mr-2');
+                copyLinkBtn.textContent = 'Copy Link';
+                copyLinkBtn.onclick = () => {
+                    const url = `${window.location.origin}/playlist/${playlist._id}`;
+                    navigator.clipboard.writeText(url).then(() => {
+                        alert('Link copied to clipboard!');
+                    }, (err) => {
+                        console.error('Failed to copy: ', err);
+                    });
+                };
+                playlistElement.appendChild(copyLinkBtn);
+            }
+
+            const moviesList = document.createElement('ul');
+            playlist.movies.forEach((movie, movieIndex) => {
+                const movieItem = document.createElement('li');
+                movieItem.classList.add('list-group-item', 'd-flex', 'justify-content-between', 'align-items-center', 'm-2');
+                movieItem.textContent = `${movie.Title} (${movie.Year})`;
+
+                const deleteMovieBtn = document.createElement('button');
+                deleteMovieBtn.classList.add('btn', 'btn-danger', 'btn-sm');
+                deleteMovieBtn.textContent = 'Delete';
+                deleteMovieBtn.onclick = () => removeMovieFromPlaylist(playlist, index, movie, movieIndex);
+                movieItem.appendChild(deleteMovieBtn);
+                moviesList.appendChild(movieItem);
+            });
+            playlistElement.appendChild(moviesList);
+
+            const deletePlaylistBtn = document.createElement('button');
+            deletePlaylistBtn.classList.add('btn', 'btn-danger', 'mt-2');
+            deletePlaylistBtn.textContent = 'Delete Playlist';
+            deletePlaylistBtn.onclick = () => removePlaylist(index, playlist);
+            playlistElement.appendChild(deletePlaylistBtn);
+
+            return playlistElement;
+        }
+
+        async function removeMovieFromPlaylist(playlist, playlistIndex, movie, movieIndex) {
+            const res = await fetch("/delete/movie", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                    playlist: playlist,
+                    movie: movie
+                })
+            });
+
+            if (!res.ok) {
+                throw new Error(`HTTP error! Status: ${res.status}`);
+            }
+            const data = await res.json();
+            console.log(data);
+            playlists[playlistIndex].movies.splice(movieIndex, 1);
+            displayPlaylists();
+        }
+
+        async function removePlaylist(playlistIndex, playlist) {
+            const res = await fetch("/delete/playlist", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                    playlist: playlist
+                })
+            });
+
+            if (!res.ok) {
+                throw new Error(`HTTP error! Status: ${res.status}`);
+            }
+            const data = await res.json();
+            console.log(data);
+            playlists.splice(playlistIndex, 1);
+            displayPlaylists();
+        }
+    </script>
+
+</body>
+
+</html>
